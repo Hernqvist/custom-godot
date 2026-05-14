@@ -71,6 +71,7 @@ private:
 	// _ prefix to avoid conflict with Windows defines.
 	InterpolatedProperty<real_t> _near = 0.05;
 	InterpolatedProperty<real_t> _far = 4000.0;
+	Plane _near_culling_plane;
 	real_t v_offset = 0.0;
 	real_t h_offset = 0.0;
 	KeepAspect keep_aspect = KEEP_HEIGHT;
@@ -152,6 +153,7 @@ public:
 	real_t get_size() const;
 	real_t get_far() const;
 	real_t get_near() const;
+	Plane get_near_culling_plane() const;
 	Vector2 get_frustum_offset() const;
 
 	ProjectionType get_projection() const;
@@ -160,6 +162,7 @@ public:
 	void set_size(real_t p_size);
 	void set_far(real_t p_far);
 	void set_near(real_t p_near);
+	void set_near_culling_plane(const Plane &p_plane);
 	void set_frustum_offset(Vector2 p_offset);
 
 	virtual Transform3D get_camera_transform() const;

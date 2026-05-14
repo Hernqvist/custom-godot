@@ -144,6 +144,12 @@ void RendererSceneCull::camera_set_use_vertical_aspect(RID p_camera, bool p_enab
 	camera->vaspect = p_enable;
 }
 
+void RendererSceneCull::camera_set_near_culling_plane(RID p_camera, const Plane &p_plane) {
+	Camera *camera = camera_owner.get_or_null(p_camera);
+	ERR_FAIL_NULL(camera);
+	camera->near_culling_plane = p_plane;
+}
+
 bool RendererSceneCull::is_camera(RID p_camera) const {
 	return camera_owner.owns(p_camera);
 }
@@ -2640,7 +2646,8 @@ void RendererSceneCull::render_camera(const Ref<RenderSceneBuffers> &p_render_bu
 						p_viewport_size.width / (float)p_viewport_size.height,
 						camera->znear,
 						camera->zfar,
-						camera->vaspect);
+						camera->vaspect,
+						camera->near_culling_plane);
 
 			} break;
 			case Camera::FRUSTUM: {

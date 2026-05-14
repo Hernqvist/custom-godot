@@ -275,6 +275,51 @@ void Projection::set_perspective(real_t p_fovy_degrees, real_t p_aspect, real_t 
 	columns[3][3] = 0;
 }
 
+void Projection::set_perspective(real_t p_fovy_degrees, real_t p_aspect, real_t p_z_near, real_t p_z_far, bool p_flip_fov, const Plane &p_near_culling_plane) {
+	// 1. Initialize the standard perspective projection matrix
+	set_perspective(p_fovy_degrees, p_aspect, p_z_near, p_z_far, p_flip_fov);
+
+	// exit early
+	if (p_near_culling_plane.get_normal().is_zero_approx()) {
+		return;
+	}
+
+	// 2. Extract the plane equation into a 4D vector.
+	// Godot's Plane equation is (normal.dot(p) == d), meaning: Nx*x + Ny*y + Nz*z - d = 0.
+	// The view-space clip plane vector C is therefore (Nx, Ny, Nz, -d).
+	Vector4 C(
+			p_near_culling_plane.normal.x,
+			p_near_culling_plane.normal.y,
+			p_near_culling_plane.normal.z,
+			-p_near_culling_plane.d);
+
+	// 3. Find the camera-space corner `Q` of the view frustum opposite the clipping plane.
+	// This ensures we warp the depth buffer optimally to preserve Z-precision at the far plane.
+	Vector4 Q(
+			(C.x < 0.0 ? -1.0 : 1.0) / columns[0][0],
+			(C.y < 0.0 ? -1.0 : 1.0) / columns[1][1],
+			-1.0,
+			(1.0 + columns[2][2]) / columns[3][2]);
+
+	// 4. Calculate the scaling factor `a`
+	real_t dot_product = C.x * Q.x + C.y * Q.y + C.z * Q.z + C.w * Q.w;
+
+	// Prevent division by zero in degenerate cases
+	if (Math::is_zero_approx(dot_product)) {
+		return;
+	}
+
+	real_t a = 2.0 / dot_product;
+
+	// 5. Replace the 3rd row of the projection matrix.
+	// Because Godot's Projection stores data in column-major order `columns[col][row]`,
+	// the 3rd row corresponds to index 2 of every column.
+	columns[0][2] = C.x * a;
+	columns[1][2] = C.y * a;
+	columns[2][2] = C.z * a + 1.0;
+	columns[3][2] = C.w * a;
+}
+
 void Projection::set_perspective(real_t p_fovy_degrees, real_t p_aspect, real_t p_z_near, real_t p_z_far, bool p_flip_fov, int p_eye, real_t p_intraocular_dist, real_t p_convergence_dist) {
 	if (p_flip_fov) {
 		p_fovy_degrees = get_fovy(p_fovy_degrees, 1.0 / p_aspect);
