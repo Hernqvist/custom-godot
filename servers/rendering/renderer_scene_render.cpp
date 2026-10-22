@@ -41,6 +41,7 @@ void RendererSceneRender::CameraData::set_camera(const Transform3D p_transform, 
 
 	main_transform = p_transform;
 	main_projection = p_projection;
+	main_regular_projection = p_projection;
 
 	visible_layers = p_visible_layers;
 	view_offset[0] = Transform3D();
@@ -180,6 +181,7 @@ void RendererSceneRender::CameraData::set_multiview_camera(uint32_t p_view_count
 
 	// 16. Use this to build the combined camera matrix.
 	main_projection.set_frustum(local_min_vec.x, local_max_vec.x, local_min_vec.y, local_max_vec.y, z_near, z_far);
+	main_regular_projection = main_projection;
 
 	/////////////////////////////////////////////////////////////////////////////
 	// 3. Copy our view data

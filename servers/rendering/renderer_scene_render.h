@@ -313,6 +313,10 @@ public:
 		// Main/center projection
 		Transform3D main_transform;
 		Projection main_projection;
+		// Same as main_projection, but without an oblique near plane (see
+		// Camera3D::near_culling_plane). Used by CPU code that needs a regular
+		// frustum, e.g. to find its corners or its near and far distances.
+		Projection main_regular_projection;
 
 		Transform3D view_offset[RendererSceneRender::MAX_RENDER_VIEWS];
 		Projection view_projection[RendererSceneRender::MAX_RENDER_VIEWS];

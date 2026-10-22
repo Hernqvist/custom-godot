@@ -2630,6 +2630,8 @@ void RendererSceneCull::render_camera(const Ref<RenderSceneBuffers> &p_render_bu
 		bool is_orthogonal = false;
 		bool is_frustum = false;
 
+		Projection regular_projection;
+
 		switch (camera->type) {
 			case Camera::ORTHOGONAL: {
 				projection.set_orthogonal(
@@ -2648,7 +2650,12 @@ void RendererSceneCull::render_camera(const Ref<RenderSceneBuffers> &p_render_bu
 						camera->zfar,
 						camera->vaspect,
 						camera->near_culling_plane);
-
+				regular_projection.set_perspective(
+						camera->fov,
+						p_viewport_size.width / (float)p_viewport_size.height,
+						camera->znear,
+						camera->zfar,
+						camera->vaspect);
 			} break;
 			case Camera::FRUSTUM: {
 				projection.set_frustum(
@@ -2663,6 +2670,9 @@ void RendererSceneCull::render_camera(const Ref<RenderSceneBuffers> &p_render_bu
 		}
 
 		camera_data.set_camera(transform, projection, is_orthogonal, is_frustum, vaspect, jitter, taa_frame_count, camera->visible_layers);
+		if (camera->type == Camera::PERSPECTIVE) {
+			camera_data.main_regular_projection = regular_projection;
+		}
 #ifndef XR_DISABLED
 	} else {
 		XRServer *xr_server = XRServer::get_singleton();
@@ -2709,7 +2719,7 @@ void RendererSceneCull::render_camera(const Ref<RenderSceneBuffers> &p_render_bu
 
 	RENDER_TIMESTAMP("Update Occlusion Buffer")
 	// For now just cull on the first camera
-	RendererSceneOcclusionCull::get_singleton()->buffer_update(p_viewport, camera_data.main_transform, camera_data.main_projection, camera_data.is_orthogonal);
+	RendererSceneOcclusionCull::get_singleton()->buffer_update(p_viewport, camera_data.main_transform, camera_data.main_regular_projection, camera_data.is_orthogonal);
 
 	_render_scene(&camera_data, p_render_buffers, environment, camera->attributes, compositor, camera->visible_layers, p_scenario, p_viewport, p_shadow_atlas, RID(), -1, p_screen_mesh_lod_threshold, true, r_render_info);
 #endif
@@ -3200,7 +3210,7 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 	Instance *render_reflection_probe = instance_owner.get_or_null(p_reflection_probe); //if null, not rendering to it
 
 	// Prepare the light - camera volume culling system.
-	light_culler->prepare_camera(p_camera_data->main_transform, p_camera_data->main_projection);
+	light_culler->prepare_camera(p_camera_data->main_transform, p_camera_data->main_regular_projection);
 
 	Scenario *scenario = scenario_owner.get_or_null(p_scenario);
 	Vector3 camera_position = p_camera_data->main_transform.origin;
@@ -3286,7 +3296,7 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 		RSG::light_storage->set_directional_shadow_count(lights_with_shadow.size());
 
 		for (int i = 0; i < lights_with_shadow.size(); i++) {
-			_light_instance_setup_directional_shadow(i, lights_with_shadow[i], p_camera_data->main_transform, p_camera_data->main_projection, p_camera_data->is_orthogonal, p_camera_data->vaspect);
+			_light_instance_setup_directional_shadow(i, lights_with_shadow[i], p_camera_data->main_transform, p_camera_data->main_regular_projection, p_camera_data->is_orthogonal, p_camera_data->vaspect);
 		}
 	}
 
@@ -3331,7 +3341,7 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 		cull_data.visible_layers = p_visible_layers;
 		cull_data.render_reflection_probe = render_reflection_probe;
 		cull_data.occlusion_buffer = RendererSceneOcclusionCull::get_singleton()->buffer_get_ptr(p_viewport);
-		cull_data.camera_matrix = &p_camera_data->main_projection;
+		cull_data.camera_matrix = &p_camera_data->main_regular_projection;
 		cull_data.visibility_viewport_mask = scenario->viewport_visibility_masks.has(p_viewport) ? scenario->viewport_visibility_masks[p_viewport] : 0;
 //#define DEBUG_CULL_TIME
 #ifdef DEBUG_CULL_TIME
@@ -3414,11 +3424,11 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 			{ //compute coverage
 
 				Transform3D cam_xf = p_camera_data->main_transform;
-				float zn = p_camera_data->main_projection.get_z_near();
+				float zn = p_camera_data->main_regular_projection.get_z_near();
 				Plane p(-cam_xf.basis.get_column(2), cam_xf.origin + cam_xf.basis.get_column(2) * -zn); //camera near plane
 
 				// near plane half width and height
-				Vector2 vp_half_extents = p_camera_data->main_projection.get_viewport_half_extents();
+				Vector2 vp_half_extents = p_camera_data->main_regular_projection.get_viewport_half_extents();
 
 				switch (RSG::light_storage->light_get_type(ins->base)) {
 					case RS::LIGHT_OMNI: {
@@ -3511,7 +3521,7 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 			if (redraw && max_shadows_used < MAX_UPDATE_SHADOWS) {
 				//must redraw!
 				RENDER_TIMESTAMP("> Render Light3D " + itos(i));
-				if (_light_instance_update_shadow(ins, p_camera_data->main_transform, p_camera_data->main_projection, p_camera_data->is_orthogonal, p_camera_data->vaspect, p_shadow_atlas, scenario, p_screen_mesh_lod_threshold, p_visible_layers)) {
+				if (_light_instance_update_shadow(ins, p_camera_data->main_transform, p_camera_data->main_regular_projection, p_camera_data->is_orthogonal, p_camera_data->vaspect, p_shadow_atlas, scenario, p_screen_mesh_lod_threshold, p_visible_layers)) {
 					light->make_shadow_dirty();
 				}
 				RENDER_TIMESTAMP("< Render Light3D " + itos(i));
