@@ -275,12 +275,12 @@ void Projection::set_perspective(real_t p_fovy_degrees, real_t p_aspect, real_t 
 	columns[3][3] = 0;
 }
 
-void Projection::set_perspective(real_t p_fovy_degrees, real_t p_aspect, real_t p_z_near, real_t p_z_far, bool p_flip_fov, const Plane &p_near_culling_plane) {
+void Projection::set_perspective(real_t p_fovy_degrees, real_t p_aspect, real_t p_z_near, real_t p_z_far, bool p_flip_fov, const Plane &p_near_clipping_plane) {
 	// 1. Initialize the standard perspective projection matrix
 	set_perspective(p_fovy_degrees, p_aspect, p_z_near, p_z_far, p_flip_fov);
 
 	// exit early
-	if (p_near_culling_plane.get_normal().is_zero_approx()) {
+	if (p_near_clipping_plane.get_normal().is_zero_approx()) {
 		return;
 	}
 
@@ -288,10 +288,10 @@ void Projection::set_perspective(real_t p_fovy_degrees, real_t p_aspect, real_t 
 	// Godot's Plane equation is (normal.dot(p) == d), meaning: Nx*x + Ny*y + Nz*z - d = 0.
 	// The view-space clip plane vector C is therefore (Nx, Ny, Nz, -d).
 	Vector4 C(
-			p_near_culling_plane.normal.x,
-			p_near_culling_plane.normal.y,
-			p_near_culling_plane.normal.z,
-			-p_near_culling_plane.d);
+			p_near_clipping_plane.normal.x,
+			p_near_clipping_plane.normal.y,
+			p_near_clipping_plane.normal.z,
+			-p_near_clipping_plane.d);
 
 	// 3. Find the camera-space corner `Q` of the view frustum opposite the clipping plane.
 	// This ensures we warp the depth buffer optimally to preserve Z-precision at the far plane.
