@@ -178,7 +178,8 @@ layout(set = 0, binding = 14, std140) uniform Params {
 	float temporal_blend;
 
 	vec2 sky_border_size;
-	vec2 pad;
+	bool use_depth_culling;
+	bool clear_culled_fog_volumes;
 
 	mat3x4 cam_rotation;
 	mat4 to_prev_view;
@@ -210,7 +211,20 @@ layout(set = 0, binding = 19) uniform texture2DArray sky_texture;
 #else
 layout(set = 0, binding = 19) uniform texture2D sky_texture;
 #endif
+
+// How many slices of each column of froxels can be seen, see
+// volumetric_fog_cull.glsl. Only used with use_depth_culling.
+layout(r32ui, set = 0, binding = 20) uniform restrict readonly uimage2D column_slices;
+
+bool is_froxel_culled(ivec3 pos) {
+	return params.use_depth_culling && uint(pos.z) >= imageLoad(column_slices, pos.xy).x;
+}
 #endif // MODE_COPY
+
+// Stored as the density of culled froxels, so that temporal reprojection
+// doesn't blend in their stale values. It is negative enough that any linear
+// sample that touches a culled froxel is negative too.
+#define CULLED_DENSITY -60000.0
 
 float get_depth_at_pos(float cell_depth_size, int z) {
 	float d = float(z) * cell_depth_size + cell_depth_size * 0.5; //center of voxels
@@ -290,6 +304,26 @@ void main() {
 	uint lpos = pos.z * params.fog_volume_size.x * params.fog_volume_size.y + pos.y * params.fog_volume_size.x + pos.x;
 #endif
 
+	if (is_froxel_culled(pos)) {
+		if (params.clear_culled_fog_volumes) {
+			// Fog volumes may have drawn here, and those maps must be cleared
+			// before the next frame draws to them again.
+#ifdef NO_IMAGE_ATOMICS
+			density_only_map[lpos] = 0;
+			light_only_map[lpos] = 0;
+			emissive_only_map[lpos] = 0;
+#else
+			imageStore(density_only_map, pos, uvec4(0));
+			imageStore(light_only_map, pos, uvec4(0));
+			imageStore(emissive_only_map, pos, uvec4(0));
+#endif
+		}
+		if (params.use_temporal_reprojection) {
+			imageStore(density_map, pos, vec4(0.0, 0.0, 0.0, CULLED_DENSITY));
+		}
+		return;
+	}
+
 	vec3 posf = vec3(pos);
 
 	//posf += mix(vec3(0.0),vec3(1.0),0.3) * hash3f(uvec3(pos)) * 2.0 - 1.0;
@@ -323,10 +357,20 @@ void main() {
 		//z back to unspread value
 		prev_view.z = pow(prev_view.z, 1.0 / params.detail_spread);
 
-		if (all(greaterThan(prev_view, vec3(0.0))) && all(lessThan(prev_view, vec3(1.0)))) {
+		bool can_reproject = all(greaterThan(prev_view, vec3(0.0))) && all(lessThan(prev_view, vec3(1.0)));
+		if (can_reproject) {
+			reprojected_density = textureLod(sampler3D(prev_density_texture, linear_sampler), prev_view, 0.0);
+			// A negative density means that the previous frame culled froxels
+			// that the sample touched.
+			if (reprojected_density.a < 0.0) {
+				reprojected_density = vec4(0.0);
+				can_reproject = false;
+			}
+		}
+
+		if (can_reproject) {
 			//reprojectinon fits
 
-			reprojected_density = textureLod(sampler3D(prev_density_texture, linear_sampler), prev_view, 0.0);
 			reproject_amount = params.temporal_blend;
 
 			// Since we can reproject, now we must jitter the current view pos.
@@ -705,7 +749,12 @@ void main() {
 	vec4 fog_accum = vec4(0.0, 0.0, 0.0, 1.0);
 	float prev_z = 0.0;
 
-	for (int i = 0; i < params.fog_volume_size.z; i++) {
+	int slice_count = params.fog_volume_size.z;
+	if (params.use_depth_culling) {
+		slice_count = min(slice_count, int(imageLoad(column_slices, pos.xy).x));
+	}
+
+	for (int i = 0; i < slice_count; i++) {
 		//compute fog position
 		ivec3 fog_pos = pos + ivec3(0, 0, i);
 		//get fog value
@@ -731,6 +780,9 @@ void main() {
 #ifdef MODE_FILTER
 
 	ivec3 pos = ivec3(gl_GlobalInvocationID.xyz);
+	if (is_froxel_culled(pos)) {
+		return;
+	}
 
 	const float gauss[7] = float[](0.071303, 0.131514, 0.189879, 0.214607, 0.189879, 0.131514, 0.071303);
 

@@ -33,6 +33,7 @@
 #include "servers/rendering/renderer_rd/renderer_compositor_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/texture_storage.h"
+#include "servers/rendering/renderer_rd/uniform_set_cache_rd.h"
 #include "servers/rendering/rendering_server_default.h"
 
 using namespace RendererRD;
@@ -329,6 +330,18 @@ ALBEDO = vec3(1.0);
 		}
 		volumetric_fog.params_ubo = RD::get_singleton()->uniform_buffer_create(sizeof(VolumetricFogShader::ParamsUBO));
 	}
+
+	{
+		Vector<String> cull_modes;
+		cull_modes.push_back("\n#define MODE_REDUCE\n");
+		cull_modes.push_back("\n#define MODE_DILATE\n");
+
+		volumetric_fog.cull_shader.initialize(cull_modes);
+		volumetric_fog.cull_shader_version = volumetric_fog.cull_shader.version_create();
+		for (int i = 0; i < VolumetricFogShader::VOLUMETRIC_FOG_CULL_SHADER_MAX; i++) {
+			volumetric_fog.cull_pipelines[i].create_compute_pipeline(volumetric_fog.cull_shader.version_get_shader(volumetric_fog.cull_shader_version, i));
+		}
+	}
 }
 
 void Fog::free_fog_shader() {
@@ -338,6 +351,12 @@ void Fog::free_fog_shader() {
 	}
 	if (volumetric_fog.process_shader_version.is_valid()) {
 		volumetric_fog.process_shader.version_free(volumetric_fog.process_shader_version);
+	}
+	for (int i = 0; i < VolumetricFogShader::VOLUMETRIC_FOG_CULL_SHADER_MAX; i++) {
+		volumetric_fog.cull_pipelines[i].free();
+	}
+	if (volumetric_fog.cull_shader_version.is_valid()) {
+		volumetric_fog.cull_shader.version_free(volumetric_fog.cull_shader_version);
 	}
 	if (volumetric_fog.volume_ubo.is_valid()) {
 		RD::get_singleton()->free_rid(volumetric_fog.volume_ubo);
@@ -470,10 +489,12 @@ void Fog::VolumetricFog::init(const Vector3i &fog_size, RID p_sky_shader) {
 	tf.height = fog_size.y;
 	tf.depth = fog_size.z;
 	tf.texture_type = RD::TEXTURE_TYPE_3D;
-	tf.usage_bits = RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT;
+	tf.usage_bits = RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT;
 
 	light_density_map = RD::get_singleton()->texture_create(tf, RD::TextureView());
 	RD::get_singleton()->set_resource_name(light_density_map, "Fog light-density map");
+	// Froxels culled by depth are not written to, so don't leave them undefined.
+	RD::get_singleton()->texture_clear(light_density_map, Color(0, 0, 0, 0), 0, 1, 0, 1);
 
 	tf.usage_bits = RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT;
 
@@ -481,10 +502,24 @@ void Fog::VolumetricFog::init(const Vector3i &fog_size, RID p_sky_shader) {
 	RD::get_singleton()->set_resource_name(prev_light_density_map, "Fog previous light-density map");
 	RD::get_singleton()->texture_clear(prev_light_density_map, Color(0, 0, 0, 0), 0, 1, 0, 1);
 
-	tf.usage_bits = RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_SAMPLING_BIT;
+	tf.usage_bits = RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT;
 
 	fog_map = RD::get_singleton()->texture_create(tf, RD::TextureView());
 	RD::get_singleton()->set_resource_name(fog_map, "Fog map");
+	RD::get_singleton()->texture_clear(fog_map, Color(0, 0, 0, 0), 0, 1, 0, 1);
+
+	{
+		RD::TextureFormat column_tf;
+		column_tf.format = RD::DATA_FORMAT_R32_UINT;
+		column_tf.width = fog_size.x;
+		column_tf.height = fog_size.y;
+		column_tf.usage_bits = RD::TEXTURE_USAGE_STORAGE_BIT;
+
+		column_slices = RD::get_singleton()->texture_create(column_tf, RD::TextureView());
+		RD::get_singleton()->set_resource_name(column_slices, "Fog column slices");
+		dilated_column_slices = RD::get_singleton()->texture_create(column_tf, RD::TextureView());
+		RD::get_singleton()->set_resource_name(dilated_column_slices, "Fog dilated column slices");
+	}
 
 	if (atomic_type == RD::UNIFORM_TYPE_STORAGE_BUFFER) {
 		Vector<uint8_t> dm;
@@ -529,6 +564,8 @@ Fog::VolumetricFog::~VolumetricFog() {
 	RD::get_singleton()->free_rid(density_map);
 	RD::get_singleton()->free_rid(light_map);
 	RD::get_singleton()->free_rid(emissive_map);
+	RD::get_singleton()->free_rid(column_slices);
+	RD::get_singleton()->free_rid(dilated_column_slices);
 
 	if (fog_uniform_set.is_valid() && RD::get_singleton()->uniform_set_is_valid(fog_uniform_set)) {
 		RD::get_singleton()->free_rid(fog_uniform_set);
@@ -982,6 +1019,13 @@ void Fog::volumetric_fog_update(const VolumetricFogSettings &p_settings, const P
 			u.append_id(sky_texture.is_valid() ? sky_texture : radiance_texture);
 			uniforms.push_back(u);
 		}
+		{
+			RD::Uniform u;
+			u.uniform_type = RD::UNIFORM_TYPE_IMAGE;
+			u.binding = 20;
+			u.append_id(fog->dilated_column_slices);
+			uniforms.push_back(u);
+		}
 
 		if (fog->copy_uniform_set.is_valid() && RD::get_singleton()->uniform_set_is_valid(fog->copy_uniform_set)) {
 			RD::get_singleton()->free_rid(fog->copy_uniform_set);
@@ -1118,6 +1162,10 @@ void Fog::volumetric_fog_update(const VolumetricFogSettings &p_settings, const P
 	params.use_temporal_reprojection = RendererSceneRenderRD::get_singleton()->environment_get_volumetric_fog_temporal_reprojection(p_settings.env);
 	params.temporal_blend = RendererSceneRenderRD::get_singleton()->environment_get_volumetric_fog_temporal_reprojection_amount(p_settings.env);
 
+	bool use_depth_culling = p_settings.depth_texture.is_valid();
+	params.use_depth_culling = use_depth_culling;
+	params.clear_culled_fog_volumes = p_fog_volumes.size() > 0;
+
 	RID sky_rid = RendererSceneRenderRD::get_singleton()->environment_get_sky(p_settings.env);
 	if (sky_rid.is_valid()) {
 		float uv_border_size = p_settings.sky->sky_get_uv_border_size(sky_rid);
@@ -1145,9 +1193,59 @@ void Fog::volumetric_fog_update(const VolumetricFogSettings &p_settings, const P
 
 	RD::get_singleton()->draw_command_begin_label("Render Volumetric Fog");
 
-	RENDER_TIMESTAMP("Render Fog");
 	RD::get_singleton()->buffer_update(volumetric_fog.params_ubo, 0, sizeof(VolumetricFogShader::ParamsUBO), &params);
 
+	if (use_depth_culling) {
+		RENDER_TIMESTAMP("Cull Fog");
+		RD::get_singleton()->draw_command_begin_label("Cull Fog");
+
+		VolumetricFogShader::CullPushConstant push_constant;
+		Projection inv_projection = p_settings.depth_projection.inverse();
+		for (int i = 0; i < 4; i++) {
+			push_constant.inv_projection_z[i] = inv_projection.columns[i][2];
+			push_constant.inv_projection_w[i] = inv_projection.columns[i][3];
+		}
+		push_constant.screen_size[0] = p_settings.rb_size.x;
+		push_constant.screen_size[1] = p_settings.rb_size.y;
+		push_constant.fog_size[0] = fog->width;
+		push_constant.fog_size[1] = fog->height;
+		push_constant.fog_depth = fog->depth;
+		// The same as the scene shader gets in _setup_environment().
+		push_constant.fog_inv_length = fog_end > 0.0001 ? 1.0 / fog_end : 1.0;
+		push_constant.inv_detail_spread = params.detail_spread > 0.0001 ? 1.0 / params.detail_spread : 1.0;
+		// The filter blurs across 3 columns on each side, and the fog is then
+		// sampled linearly between neighboring columns.
+		push_constant.dilate_radius = p_settings.volumetric_fog_filter_active ? 4 : 1;
+
+		UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
+		RID nearest_sampler = material_storage->sampler_rd_get_default(RS::CANVAS_ITEM_TEXTURE_FILTER_NEAREST, RS::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
+		RD::Uniform u_depth_texture(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ nearest_sampler, p_settings.depth_texture }));
+		RD::Uniform u_column_slices_dest(RD::UNIFORM_TYPE_IMAGE, 1, fog->column_slices);
+		RD::Uniform u_column_slices_source(RD::UNIFORM_TYPE_IMAGE, 0, fog->column_slices);
+		RD::Uniform u_dilated_column_slices(RD::UNIFORM_TYPE_IMAGE, 1, fog->dilated_column_slices);
+
+		// A list of its own, since compute_list_add_barrier() would carry the push
+		// constant over to the passes below, which take none.
+		RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
+
+		RID shader = volumetric_fog.cull_shader.version_get_shader(volumetric_fog.cull_shader_version, VolumetricFogShader::VOLUMETRIC_FOG_CULL_SHADER_REDUCE);
+		RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, volumetric_fog.cull_pipelines[VolumetricFogShader::VOLUMETRIC_FOG_CULL_SHADER_REDUCE].get_rid());
+		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 0, u_depth_texture, u_column_slices_dest), 0);
+		RD::get_singleton()->compute_list_set_push_constant(compute_list, &push_constant, sizeof(VolumetricFogShader::CullPushConstant));
+		RD::get_singleton()->compute_list_dispatch_threads(compute_list, fog->width, fog->height, 1);
+		RD::get_singleton()->compute_list_add_barrier(compute_list);
+
+		shader = volumetric_fog.cull_shader.version_get_shader(volumetric_fog.cull_shader_version, VolumetricFogShader::VOLUMETRIC_FOG_CULL_SHADER_DILATE);
+		RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, volumetric_fog.cull_pipelines[VolumetricFogShader::VOLUMETRIC_FOG_CULL_SHADER_DILATE].get_rid());
+		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 0, u_column_slices_source, u_dilated_column_slices), 0);
+		RD::get_singleton()->compute_list_set_push_constant(compute_list, &push_constant, sizeof(VolumetricFogShader::CullPushConstant));
+		RD::get_singleton()->compute_list_dispatch_threads(compute_list, fog->width, fog->height, 1);
+		RD::get_singleton()->compute_list_end();
+
+		RD::get_singleton()->draw_command_end_label();
+	}
+
+	RENDER_TIMESTAMP("Render Fog");
 	RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
 
 	RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, volumetric_fog.process_pipelines[using_sdfgi ? VolumetricFogShader::VOLUMETRIC_FOG_PROCESS_SHADER_DENSITY_WITH_SDFGI : VolumetricFogShader::VOLUMETRIC_FOG_PROCESS_SHADER_DENSITY].get_rid());

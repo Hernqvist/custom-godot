@@ -37,6 +37,7 @@
 #include "servers/rendering/renderer_rd/environment/gi.h"
 #include "servers/rendering/renderer_rd/pipeline_deferred_rd.h"
 #include "servers/rendering/renderer_rd/shaders/environment/volumetric_fog.glsl.gen.h"
+#include "servers/rendering/renderer_rd/shaders/environment/volumetric_fog_cull.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/environment/volumetric_fog_process.glsl.gen.h"
 #include "servers/rendering/renderer_rd/storage_rd/render_buffer_custom_data_rd.h"
 #include "servers/rendering/storage/utilities.h"
@@ -183,7 +184,8 @@ private:
 			float temporal_blend;
 
 			float sky_border_size[2];
-			float pad[2];
+			uint32_t use_depth_culling;
+			uint32_t clear_culled_fog_volumes;
 
 			float cam_rotation[12];
 			float to_prev_view[16];
@@ -195,6 +197,26 @@ private:
 		RID process_shader_version;
 		PipelineDeferredRD process_pipelines[VOLUMETRIC_FOG_PROCESS_SHADER_MAX];
 
+		enum {
+			VOLUMETRIC_FOG_CULL_SHADER_REDUCE,
+			VOLUMETRIC_FOG_CULL_SHADER_DILATE,
+			VOLUMETRIC_FOG_CULL_SHADER_MAX,
+		};
+
+		struct CullPushConstant {
+			float inv_projection_z[4];
+			float inv_projection_w[4];
+			int32_t screen_size[2];
+			int32_t fog_size[2];
+			int32_t fog_depth;
+			float fog_inv_length;
+			float inv_detail_spread;
+			int32_t dilate_radius;
+		};
+
+		VolumetricFogCullShaderRD cull_shader;
+		RID cull_shader_version;
+		PipelineDeferredRD cull_pipelines[VOLUMETRIC_FOG_CULL_SHADER_MAX];
 	} volumetric_fog;
 
 	Vector3i _point_get_position_in_froxel_volume(const Vector3 &p_point, float fog_end, const Vector2 &fog_near_size, const Vector2 &fog_far_size, float volumetric_fog_detail_spread, const Vector3 &fog_size, const Transform3D &p_cam_transform);
@@ -316,6 +338,10 @@ public:
 		RID density_map;
 		RID light_map;
 		RID emissive_map;
+		// How many slices of each column can be seen, before and after taking
+		// the neighboring columns into account. See volumetric_fog_cull.glsl.
+		RID column_slices;
+		RID dilated_column_slices;
 
 		RID fog_uniform_set;
 		RID copy_uniform_set;
@@ -359,6 +385,12 @@ public:
 		RID spot_light_buffer;
 		RID directional_shadow_depth;
 		RID directional_light_buffer;
+
+		// When valid, froxels that are hidden behind this depth buffer are not
+		// computed. It must have been rendered with depth_projection, which
+		// includes the depth correction.
+		RID depth_texture;
+		Projection depth_projection;
 
 		// Objects related to our render buffer
 		Ref<VolumetricFog> vfog;
