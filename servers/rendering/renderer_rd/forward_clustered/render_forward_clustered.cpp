@@ -1315,8 +1315,9 @@ void RenderForwardClustered::_update_volumetric_fog(Ref<RenderSceneBuffersRD> p_
 
 	Size2i size = p_render_buffers->get_internal_size();
 	float ratio = float(size.x) / float((size.x + size.y) / 2);
-	uint32_t target_width = uint32_t(float(get_volumetric_fog_size()) * ratio);
-	uint32_t target_height = uint32_t(float(get_volumetric_fog_size()) / ratio);
+	float fog_size = float(get_volumetric_fog_size()) * p_render_buffers->get_volumetric_fog_size_scale();
+	uint32_t target_width = MAX(uint32_t(fog_size * ratio), 1u);
+	uint32_t target_height = MAX(uint32_t(fog_size / ratio), 1u);
 
 	if (p_render_buffers->has_custom_data(RB_SCOPE_FOG)) {
 		Ref<RendererRD::Fog::VolumetricFog> fog = p_render_buffers->get_custom_data(RB_SCOPE_FOG);

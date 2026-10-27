@@ -4328,6 +4328,14 @@
 				If [code]true[/code], the viewport uses augmented or virtual reality technologies. See [XRInterface].
 			</description>
 		</method>
+		<method name="viewport_set_volumetric_fog_size_scale">
+			<return type="void" />
+			<param index="0" name="viewport" type="RID" />
+			<param index="1" name="scale" type="float" />
+			<description>
+				Multiplies the width and height of the volumetric fog's froxel grid in the viewport. Equivalent to [member Viewport.volumetric_fog_size_scale].
+			</description>
+		</method>
 		<method name="viewport_set_vrs_mode">
 			<return type="void" />
 			<param index="0" name="viewport" type="RID" />

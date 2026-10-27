@@ -282,6 +282,7 @@ void RendererViewport::_configure_3d_render_buffers(Viewport *p_viewport) {
 			rb_config.set_anisotropic_filtering_level(p_viewport->anisotropic_filtering_level);
 			rb_config.set_use_taa(use_taa);
 			rb_config.set_use_debanding(p_viewport->use_debanding);
+			rb_config.set_volumetric_fog_size_scale(p_viewport->volumetric_fog_size_scale);
 
 			p_viewport->render_buffers->configure(&rb_config);
 		}
@@ -1507,6 +1508,14 @@ void RendererViewport::viewport_set_mesh_lod_threshold(RID p_viewport, float p_p
 	ERR_FAIL_NULL(viewport);
 
 	viewport->mesh_lod_threshold = p_pixels;
+}
+
+void RendererViewport::viewport_set_volumetric_fog_size_scale(RID p_viewport, float p_scale) {
+	Viewport *viewport = viewport_owner.get_or_null(p_viewport);
+	ERR_FAIL_NULL(viewport);
+
+	viewport->volumetric_fog_size_scale = p_scale;
+	_configure_3d_render_buffers(viewport);
 }
 
 int RendererViewport::viewport_get_render_info(RID p_viewport, RS::ViewportRenderInfoType p_type, RS::ViewportRenderInfo p_info) {

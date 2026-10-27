@@ -82,6 +82,8 @@ private:
 	float fsr_sharpness = 0.2f;
 	float texture_mipmap_bias = 0.0f;
 	RS::ViewportAnisotropicFiltering anisotropic_filtering_level = RS::VIEWPORT_ANISOTROPY_4X;
+	// Multiplies the width and height of the volumetric fog's froxel grid.
+	float volumetric_fog_size_scale = 1.0f;
 
 #ifdef METAL_ENABLED
 	RendererRD::MFXSpatialContext *mfx_spatial_context = nullptr;
@@ -236,6 +238,7 @@ public:
 	_FORCE_INLINE_ Size2i get_target_size() const { return target_size; }
 	_FORCE_INLINE_ RS::ViewportScaling3DMode get_scaling_3d_mode() const { return scaling_3d_mode; }
 	_FORCE_INLINE_ float get_fsr_sharpness() const { return fsr_sharpness; }
+	_FORCE_INLINE_ float get_volumetric_fog_size_scale() const { return volumetric_fog_size_scale; }
 	_FORCE_INLINE_ RS::ViewportMSAA get_msaa_3d() const { return msaa_3d; }
 	_FORCE_INLINE_ RD::TextureSamples get_texture_samples() const { return texture_samples; }
 	_FORCE_INLINE_ RS::ViewportScreenSpaceAA get_screen_space_aa() const { return screen_space_aa; }

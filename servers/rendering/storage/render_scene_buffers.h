@@ -52,6 +52,7 @@ private:
 	float texture_mipmap_bias = 0.0;
 	bool use_taa = false;
 	bool use_debanding = false;
+	float volumetric_fog_size_scale = 1.0;
 
 protected:
 	static void _bind_methods();
@@ -92,6 +93,10 @@ public:
 
 	bool get_use_debanding() const { return use_debanding; }
 	void set_use_debanding(bool p_use_debanding) { use_debanding = p_use_debanding; }
+
+	// Not exposed, since only the built-in renderers use volumetric fog.
+	float get_volumetric_fog_size_scale() const { return volumetric_fog_size_scale; }
+	void set_volumetric_fog_size_scale(float p_scale) { volumetric_fog_size_scale = p_scale; }
 
 	RenderSceneBuffersConfiguration() {}
 	virtual ~RenderSceneBuffersConfiguration() {}

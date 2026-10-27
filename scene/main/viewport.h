@@ -318,6 +318,7 @@ private:
 	AnisotropicFiltering anisotropic_filtering_level = ANISOTROPY_4X;
 	bool use_debanding = false;
 	float mesh_lod_threshold = 1.0;
+	float volumetric_fog_size_scale = 1.0;
 	bool use_occlusion_culling = false;
 
 	Ref<ViewportTexture> default_texture;
@@ -601,6 +602,9 @@ public:
 
 	void set_mesh_lod_threshold(float p_pixels);
 	float get_mesh_lod_threshold() const;
+
+	void set_volumetric_fog_size_scale(float p_scale);
+	float get_volumetric_fog_size_scale() const;
 
 	void set_use_occlusion_culling(bool p_us_occlusion_culling);
 	bool is_using_occlusion_culling() const;

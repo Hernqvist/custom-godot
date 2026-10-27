@@ -167,6 +167,7 @@ void RenderSceneBuffersRD::configure(const RenderSceneBuffersConfiguration *p_co
 	anisotropic_filtering_level = p_config->get_anisotropic_filtering_level();
 	use_taa = p_config->get_use_taa();
 	use_debanding = p_config->get_use_debanding();
+	volumetric_fog_size_scale = p_config->get_volumetric_fog_size_scale();
 
 	ERR_FAIL_COND_MSG(view_count == 0, "Must have at least 1 view");
 
