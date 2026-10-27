@@ -185,6 +185,9 @@ layout(set = 0, binding = 14, std140) uniform Params {
 	mat4 to_prev_view;
 
 	mat3 radiance_inverse_xform;
+
+	// Viewport::volumetric_fog_size_scale, by which the filter is narrowed.
+	float filter_scale;
 }
 params;
 #ifndef MODE_COPY
@@ -789,9 +792,26 @@ void main() {
 	const ivec3 filter_dir[3] = ivec3[](ivec3(1, 0, 0), ivec3(0, 1, 0), ivec3(0, 0, 1));
 	ivec3 offset = filter_dir[params.filter_axis];
 
+	// A grid scaled by filter_scale has froxels 1 / filter_scale times as wide,
+	// so narrow the filter by as much, to blur the same part of the screen.
+	// Otherwise the fog would look different whenever a viewport changes scale.
+	float weights[7] = gauss;
+	if (params.filter_scale < 1.0) {
+		// The weights above are those of a Gaussian with a sigma of 2.
+		float sigma = 2.0 * max(params.filter_scale, 0.01);
+		float total = 0.0;
+		for (int i = -3; i <= 3; i++) {
+			weights[i + 3] = exp(-float(i * i) / (2.0 * sigma * sigma));
+			total += weights[i + 3];
+		}
+		for (int i = 0; i < 7; i++) {
+			weights[i] /= total;
+		}
+	}
+
 	vec4 accum = vec4(0.0);
 	for (int i = -3; i <= 3; i++) {
-		accum += imageLoad(source_map, clamp(pos + offset * i, ivec3(0), params.fog_volume_size - ivec3(1))) * gauss[i + 3];
+		accum += imageLoad(source_map, clamp(pos + offset * i, ivec3(0), params.fog_volume_size - ivec3(1))) * weights[i + 3];
 	}
 
 	imageStore(dest_map, pos, accum);

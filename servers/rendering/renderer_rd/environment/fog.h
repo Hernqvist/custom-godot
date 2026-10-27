@@ -190,6 +190,9 @@ private:
 			float cam_rotation[12];
 			float to_prev_view[16];
 			float radiance_inverse_xform[12];
+
+			float filter_scale;
+			float pad[3];
 		};
 
 		VolumetricFogProcessShaderRD process_shader;
@@ -379,6 +382,8 @@ public:
 		bool is_using_radiance_octmap_array;
 		uint32_t max_cluster_elements;
 		bool volumetric_fog_filter_active;
+		// Viewport::volumetric_fog_size_scale.
+		float size_scale = 1.0;
 		RID shadow_sampler;
 		RID voxel_gi_buffer;
 		RID shadow_atlas_depth;

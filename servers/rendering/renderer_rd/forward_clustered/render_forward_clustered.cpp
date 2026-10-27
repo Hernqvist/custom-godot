@@ -1351,6 +1351,7 @@ void RenderForwardClustered::_update_volumetric_fog(Ref<RenderSceneBuffersRD> p_
 		settings.is_using_radiance_octmap_array = is_using_radiance_octmap_array();
 		settings.max_cluster_elements = RendererRD::LightStorage::get_singleton()->get_max_cluster_elements();
 		settings.volumetric_fog_filter_active = get_volumetric_fog_filter_active();
+		settings.size_scale = p_render_buffers->get_volumetric_fog_size_scale();
 
 		settings.shadow_sampler = shadow_sampler;
 		settings.shadow_atlas_depth = RendererRD::LightStorage::get_singleton()->owns_shadow_atlas(p_shadow_atlas) ? RendererRD::LightStorage::get_singleton()->shadow_atlas_get_texture(p_shadow_atlas) : RID();
