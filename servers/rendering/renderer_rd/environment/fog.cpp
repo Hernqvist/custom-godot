@@ -584,6 +584,36 @@ Fog::VolumetricFog::~VolumetricFog() {
 	}
 }
 
+// Finds the half extents of the froxel grid where it begins, at the camera, and
+// where it ends, at p_fog_end, and the distance to the corners of the near
+// plane.
+void Fog::_get_froxel_frustum(const Projection &p_cam_projection, float p_fog_end, Vector2 &r_begin_size, Vector2 &r_end_size, float &r_near_corner_distance) {
+	if (!p_cam_projection.is_orthogonal() && (p_cam_projection.columns[0][2] != 0.0 || p_cam_projection.columns[1][2] != 0.0)) {
+		// An oblique near plane (Camera3D::near_clipping_plane) only changes the
+		// depth row of the projection, so its near and far planes no longer bound
+		// the view and get_viewport_half_extents(), get_far_plane_half_extents()
+		// and get_z_near() give meaningless, possibly infinite, values. The sides
+		// of the frustum still follow from the x and y scale.
+		r_end_size = Vector2(p_fog_end / p_cam_projection.columns[0][0], p_fog_end / p_cam_projection.columns[1][1]);
+		r_begin_size = Vector2(0.001, 0.001);
+		r_near_corner_distance = 0.0;
+		return;
+	}
+
+	Vector2 frustum_near_size = p_cam_projection.get_viewport_half_extents();
+	Vector2 frustum_far_size = p_cam_projection.get_far_plane_half_extents();
+	float z_near = p_cam_projection.get_z_near();
+	float z_far = p_cam_projection.get_z_far();
+
+	r_end_size = frustum_near_size.lerp(frustum_far_size, (p_fog_end - z_near) / (z_far - z_near));
+	if (p_cam_projection.is_orthogonal()) {
+		r_begin_size = r_end_size;
+	} else {
+		r_begin_size = frustum_near_size.maxf(0.001);
+	}
+	r_near_corner_distance = Vector3(frustum_near_size.x, frustum_near_size.y, z_near).length();
+}
+
 Vector3i Fog::_point_get_position_in_froxel_volume(const Vector3 &p_point, float fog_end, const Vector2 &fog_near_size, const Vector2 &fog_far_size, float volumetric_fog_detail_spread, const Vector3 &fog_size, const Transform3D &p_cam_transform) {
 	Vector3 view_position = p_cam_transform.affine_inverse().xform(p_point);
 	view_position.z = MIN(view_position.z, -0.01); // Clamp to the front of camera
@@ -617,19 +647,14 @@ void Fog::volumetric_fog_update(const VolumetricFogSettings &p_settings, const P
 
 		VolumetricFogShader::VolumeUBO params;
 
-		Vector2 frustum_near_size = p_cam_projection.get_viewport_half_extents();
-		Vector2 frustum_far_size = p_cam_projection.get_far_plane_half_extents();
 		float z_near = p_cam_projection.get_z_near();
 		float z_far = p_cam_projection.get_z_far();
 		float fog_end = RendererSceneRenderRD::get_singleton()->environment_get_volumetric_fog_length(p_settings.env);
 
-		Vector2 fog_far_size = frustum_near_size.lerp(frustum_far_size, (fog_end - z_near) / (z_far - z_near));
 		Vector2 fog_near_size;
-		if (p_cam_projection.is_orthogonal()) {
-			fog_near_size = fog_far_size;
-		} else {
-			fog_near_size = frustum_near_size.maxf(0.001);
-		}
+		Vector2 fog_far_size;
+		float near_corner_distance;
+		_get_froxel_frustum(p_cam_projection, fog_end, fog_near_size, fog_far_size, near_corner_distance);
 
 		params.fog_frustum_size_begin[0] = fog_near_size.x;
 		params.fog_frustum_size_begin[1] = fog_near_size.y;
@@ -764,8 +789,7 @@ void Fog::volumetric_fog_update(const VolumetricFogSettings &p_settings, const P
 
 				// Tracking just the corners of the fog volume can result in missing some fog:
 				// when the camera's near plane is inside the fog, we must always consider the entire screen
-				Vector3 near_plane_corner(frustum_near_size.x, frustum_near_size.y, z_near);
-				float expand = near_plane_corner.length();
+				float expand = near_corner_distance;
 				if (cam_position.x > (corner_min.x - expand) && cam_position.x < (corner_max.x + expand) &&
 						cam_position.y > (corner_min.y - expand) && cam_position.y < (corner_max.y + expand) &&
 						cam_position.z > (corner_min.z - expand) && cam_position.z < (corner_max.z + expand)) {
@@ -1088,19 +1112,14 @@ void Fog::volumetric_fog_update(const VolumetricFogSettings &p_settings, const P
 
 	VolumetricFogShader::ParamsUBO params;
 
-	Vector2 frustum_near_size = p_cam_projection.get_viewport_half_extents();
-	Vector2 frustum_far_size = p_cam_projection.get_far_plane_half_extents();
-	float z_near = p_cam_projection.get_z_near();
+	// Must match the cluster builder, which also gets it from the projection.
 	float z_far = p_cam_projection.get_z_far();
 	float fog_end = RendererSceneRenderRD::get_singleton()->environment_get_volumetric_fog_length(p_settings.env);
 
-	Vector2 fog_far_size = frustum_near_size.lerp(frustum_far_size, (fog_end - z_near) / (z_far - z_near));
 	Vector2 fog_near_size;
-	if (p_cam_projection.is_orthogonal()) {
-		fog_near_size = fog_far_size;
-	} else {
-		fog_near_size = frustum_near_size.maxf(0.001);
-	}
+	Vector2 fog_far_size;
+	float near_corner_distance;
+	_get_froxel_frustum(p_cam_projection, fog_end, fog_near_size, fog_far_size, near_corner_distance);
 
 	params.fog_frustum_size_begin[0] = fog_near_size.x;
 	params.fog_frustum_size_begin[1] = fog_near_size.y;

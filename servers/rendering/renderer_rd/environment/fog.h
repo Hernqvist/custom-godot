@@ -219,6 +219,7 @@ private:
 		PipelineDeferredRD cull_pipelines[VOLUMETRIC_FOG_CULL_SHADER_MAX];
 	} volumetric_fog;
 
+	static void _get_froxel_frustum(const Projection &p_cam_projection, float p_fog_end, Vector2 &r_begin_size, Vector2 &r_end_size, float &r_near_corner_distance);
 	Vector3i _point_get_position_in_froxel_volume(const Vector3 &p_point, float fog_end, const Vector2 &fog_near_size, const Vector2 &fog_far_size, float volumetric_fog_detail_spread, const Vector3 &fog_size, const Transform3D &p_cam_transform);
 
 	struct FogShaderData : public RendererRD::MaterialStorage::ShaderData {
