@@ -65,6 +65,8 @@ layout(set = 1, binding = 2, std140) uniform SceneParams {
 
 	mat4 to_prev_view;
 	mat4 transform;
+
+	bool use_depth_culling;
 }
 scene_params;
 
@@ -79,6 +81,10 @@ layout(set = 1, binding = 4) volatile buffer light_only_map_buffer {
 layout(r32ui, set = 1, binding = 3) uniform volatile uimage3D density_only_map;
 layout(r32ui, set = 1, binding = 4) uniform volatile uimage3D light_only_map;
 #endif
+
+// How many slices of each column of froxels can be seen, see
+// volumetric_fog_cull.glsl. Only used with use_depth_culling.
+layout(r32ui, set = 1, binding = 5) uniform restrict readonly uimage2D column_slices;
 
 #ifdef MATERIAL_UNIFORMS_USED
 /* clang-format off */
@@ -122,6 +128,10 @@ void main() {
 	ivec3 pos = ivec3(gl_GlobalInvocationID.xyz) + params.corner;
 	if (any(greaterThanEqual(pos, scene_params.fog_volume_size))) {
 		return; //do not compute
+	}
+	if (scene_params.use_depth_culling && uint(pos.z) >= imageLoad(column_slices, pos.xy).x) {
+		// Hidden behind the depth buffer, so the volumetric fog skips it.
+		return;
 	}
 #ifdef NO_IMAGE_ATOMICS
 	uint lpos = pos.z * scene_params.fog_volume_size.x * scene_params.fog_volume_size.y + pos.y * scene_params.fog_volume_size.x + pos.x;

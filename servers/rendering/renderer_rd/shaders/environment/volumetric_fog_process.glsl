@@ -179,7 +179,7 @@ layout(set = 0, binding = 14, std140) uniform Params {
 
 	vec2 sky_border_size;
 	bool use_depth_culling;
-	bool clear_culled_fog_volumes;
+	uint pad;
 
 	mat3x4 cam_rotation;
 	mat4 to_prev_view;
@@ -188,6 +188,8 @@ layout(set = 0, binding = 14, std140) uniform Params {
 
 	// Viewport::volumetric_fog_size_scale, by which the filter is narrowed.
 	float filter_scale;
+	// How many froxels the filter reaches to each side.
+	int filter_radius;
 }
 params;
 #ifndef MODE_COPY
@@ -308,19 +310,7 @@ void main() {
 #endif
 
 	if (is_froxel_culled(pos)) {
-		if (params.clear_culled_fog_volumes) {
-			// Fog volumes may have drawn here, and those maps must be cleared
-			// before the next frame draws to them again.
-#ifdef NO_IMAGE_ATOMICS
-			density_only_map[lpos] = 0;
-			light_only_map[lpos] = 0;
-			emissive_only_map[lpos] = 0;
-#else
-			imageStore(density_only_map, pos, uvec4(0));
-			imageStore(light_only_map, pos, uvec4(0));
-			imageStore(emissive_only_map, pos, uvec4(0));
-#endif
-		}
+		// Fog volumes skip culled froxels too, so their maps are still clear.
 		if (params.use_temporal_reprojection) {
 			imageStore(density_map, pos, vec4(0.0, 0.0, 0.0, CULLED_DENSITY));
 		}
@@ -795,13 +785,15 @@ void main() {
 	// A grid scaled by filter_scale has froxels 1 / filter_scale times as wide,
 	// so narrow the filter by as much, to blur the same part of the screen.
 	// Otherwise the fog would look different whenever a viewport changes scale.
+	// It then also reaches fewer froxels to each side, filter_radius rather
+	// than 3, which lets depth culling skip more of a scaled grid.
 	float weights[7] = gauss;
 	if (params.filter_scale < 1.0) {
 		// The weights above are those of a Gaussian with a sigma of 2.
 		float sigma = 2.0 * max(params.filter_scale, 0.01);
 		float total = 0.0;
 		for (int i = -3; i <= 3; i++) {
-			weights[i + 3] = exp(-float(i * i) / (2.0 * sigma * sigma));
+			weights[i + 3] = abs(i) <= params.filter_radius ? exp(-float(i * i) / (2.0 * sigma * sigma)) : 0.0;
 			total += weights[i + 3];
 		}
 		for (int i = 0; i < 7; i++) {
@@ -811,7 +803,10 @@ void main() {
 
 	vec4 accum = vec4(0.0);
 	for (int i = -3; i <= 3; i++) {
-		accum += imageLoad(source_map, clamp(pos + offset * i, ivec3(0), params.fog_volume_size - ivec3(1))) * weights[i + 3];
+		// Beyond the radius, froxels may have been culled.
+		if (abs(i) <= params.filter_radius) {
+			accum += imageLoad(source_map, clamp(pos + offset * i, ivec3(0), params.fog_volume_size - ivec3(1))) * weights[i + 3];
+		}
 	}
 
 	imageStore(dest_map, pos, accum);

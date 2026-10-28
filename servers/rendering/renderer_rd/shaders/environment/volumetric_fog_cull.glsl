@@ -52,26 +52,46 @@ uint get_slices_needed(ivec2 pixel, float depth) {
 	return uint(min(int(unit_depth * float(params.fog_depth)) + 2, params.fog_depth));
 }
 
-void main() {
-	// Each invocation reduces the pixels that overlap one column. Columns
-	// usually cover few pixels, so this is cheaper than a group per column.
-	ivec2 column = ivec2(gl_GlobalInvocationID.xy);
-	if (any(greaterThanEqual(column, params.fog_size))) {
-		return;
-	}
+// Each column is reduced by COLUMN_INVOCATIONS x COLUMN_INVOCATIONS
+// invocations, each taking every COLUMN_INVOCATIONSth pixel. A column covers
+// hundreds of pixels at high resolutions, too many to read one after another in
+// one invocation.
+#define COLUMN_INVOCATIONS 4
+#define GROUP_COLUMNS (BLOCK_SIZE / COLUMN_INVOCATIONS)
 
-	ivec2 from = (column * params.screen_size) / params.fog_size;
-	ivec2 to = min(((column + 1) * params.screen_size + params.fog_size - 1) / params.fog_size, params.screen_size);
+shared uint invocation_slices[BLOCK_SIZE * BLOCK_SIZE];
+
+void main() {
+	ivec2 local = ivec2(gl_LocalInvocationID.xy);
+	ivec2 column = ivec2(gl_WorkGroupID.xy) * GROUP_COLUMNS + local / COLUMN_INVOCATIONS;
+	ivec2 offset = local % COLUMN_INVOCATIONS;
+	bool in_grid = all(lessThan(column, params.fog_size));
 
 	uint slices = 0;
-	for (int y = from.y; y < to.y && slices < uint(params.fog_depth); y++) {
-		for (int x = from.x; x < to.x; x++) {
-			ivec2 pixel = ivec2(x, y);
-			slices = max(slices, get_slices_needed(pixel, texelFetch(depth_buffer, pixel, 0).r));
+	if (in_grid) {
+		ivec2 from = (column * params.screen_size) / params.fog_size;
+		ivec2 to = min(((column + 1) * params.screen_size + params.fog_size - 1) / params.fog_size, params.screen_size);
+
+		for (int y = from.y + offset.y; y < to.y && slices < uint(params.fog_depth); y += COLUMN_INVOCATIONS) {
+			for (int x = from.x + offset.x; x < to.x; x += COLUMN_INVOCATIONS) {
+				ivec2 pixel = ivec2(x, y);
+				slices = max(slices, get_slices_needed(pixel, texelFetch(depth_buffer, pixel, 0).r));
+			}
 		}
 	}
 
-	imageStore(column_slices, column, uvec4(slices));
+	invocation_slices[gl_LocalInvocationIndex] = slices;
+	memoryBarrierShared();
+	barrier();
+
+	if (in_grid && all(equal(offset, ivec2(0)))) {
+		for (int y = 0; y < COLUMN_INVOCATIONS; y++) {
+			for (int x = 0; x < COLUMN_INVOCATIONS; x++) {
+				slices = max(slices, invocation_slices[(local.y + y) * BLOCK_SIZE + local.x + x]);
+			}
+		}
+		imageStore(column_slices, column, uvec4(slices));
+	}
 }
 
 #endif

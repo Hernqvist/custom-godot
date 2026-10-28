@@ -125,6 +125,9 @@ private:
 
 			float to_prev_view[16];
 			float transform[16];
+
+			uint32_t use_depth_culling;
+			uint32_t pad[3];
 		};
 
 		ShaderCompiler compiler;
@@ -185,14 +188,15 @@ private:
 
 			float sky_border_size[2];
 			uint32_t use_depth_culling;
-			uint32_t clear_culled_fog_volumes;
+			uint32_t pad2;
 
 			float cam_rotation[12];
 			float to_prev_view[16];
 			float radiance_inverse_xform[12];
 
 			float filter_scale;
-			float pad[3];
+			int32_t filter_radius;
+			float pad[2];
 		};
 
 		VolumetricFogProcessShaderRD process_shader;
