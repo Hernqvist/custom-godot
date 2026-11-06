@@ -90,6 +90,10 @@ void CSGShape3D::set_use_collision(bool p_enable) {
 	use_collision = p_enable;
 
 	if (!is_inside_tree() || !is_root_shape()) {
+		if (!use_collision) {
+			// The shape kept from when it was in the tree would no longer be updated.
+			root_collision_shape.unref();
+		}
 		return;
 	}
 
@@ -857,6 +861,10 @@ void CSGShape3D::_notification(int p_what) {
 				if (parent_shape) {
 					set_base(RID());
 					root_mesh.unref();
+#ifndef PHYSICS_3D_DISABLED
+					// Only root shapes have one, and it would no longer be updated.
+					root_collision_shape.unref();
+#endif // PHYSICS_3D_DISABLED
 				}
 			}
 			if (!brush || parent_shape) {
@@ -896,7 +904,12 @@ void CSGShape3D::_notification(int p_what) {
 #ifndef PHYSICS_3D_DISABLED
 		case NOTIFICATION_ENTER_TREE: {
 			if (use_collision && is_root_shape()) {
-				root_collision_shape.instantiate();
+				// The shape is kept when the node leaves the tree, so that coming back
+				// doesn't rebuild the brush, nor the physics server's shape.
+				bool has_shape = root_collision_shape.is_valid();
+				if (!has_shape) {
+					root_collision_shape.instantiate();
+				}
 				root_collision_instance = PhysicsServer3D::get_singleton()->body_create();
 				PhysicsServer3D::get_singleton()->body_set_mode(root_collision_instance, PhysicsServer3D::BODY_MODE_STATIC);
 				PhysicsServer3D::get_singleton()->body_set_state(root_collision_instance, PhysicsServer3D::BODY_STATE_TRANSFORM, get_global_transform());
@@ -907,7 +920,14 @@ void CSGShape3D::_notification(int p_what) {
 				set_collision_mask(collision_mask);
 				set_collision_priority(collision_priority);
 				debug_shape_old_transform = get_global_transform();
-				_make_dirty();
+				if (dirty || !brush) {
+					// The update gives the shape its faces.
+					_make_dirty();
+				} else if (!has_shape) {
+					_update_collision_faces();
+				} else {
+					_update_debug_collision_shape();
+				}
 			}
 		} break;
 
@@ -915,7 +935,8 @@ void CSGShape3D::_notification(int p_what) {
 			if (use_collision && is_root_shape() && root_collision_instance.is_valid()) {
 				PhysicsServer3D::get_singleton()->free_rid(root_collision_instance);
 				root_collision_instance = RID();
-				root_collision_shape.unref();
+				// root_collision_shape is kept for when it comes back, and kept up to
+				// date meanwhile by update_shape().
 				_clear_debug_collision_shape();
 			}
 		} break;
