@@ -157,7 +157,14 @@ void RendererCompositorRD::initialize() {
 		blit.index_buffer = RD::get_singleton()->index_buffer_create(6, RenderingDevice::INDEX_BUFFER_FORMAT_UINT16, pv);
 		blit.array = RD::get_singleton()->index_array_create(blit.index_buffer, 0, 6);
 
-		blit.sampler = RD::get_singleton()->sampler_create(RD::SamplerState());
+		// Linear, so that a render target smaller than its rect on the screen,
+		// e.g. the root viewport of a window whose content scale mode is
+		// viewport, is upscaled smoothly rather than pixelated. A render target
+		// that fills its rect exactly samples at its pixels' centers either way.
+		RD::SamplerState sampler_state;
+		sampler_state.mag_filter = RD::SAMPLER_FILTER_LINEAR;
+		sampler_state.min_filter = RD::SAMPLER_FILTER_LINEAR;
+		blit.sampler = RD::get_singleton()->sampler_create(sampler_state);
 	}
 }
 

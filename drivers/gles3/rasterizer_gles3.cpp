@@ -437,8 +437,10 @@ void RasterizerGLES3::_blit_render_target_to_screen(DisplayServer::WindowID p_sc
 	glActiveTexture(GL_TEXTURE0);
 	GLenum target = rt->view_count > 1 ? GL_TEXTURE_2D_ARRAY : GL_TEXTURE_2D;
 	glBindTexture(target, rt->color);
-	glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	// Linear, so that a render target smaller than its rect on the screen is
+	// upscaled smoothly rather than pixelated, as in RendererCompositorRD.
+	glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
 	glDisable(GL_CULL_FACE);
 
